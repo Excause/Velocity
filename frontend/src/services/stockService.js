@@ -1,71 +1,127 @@
 /**
  * Stock Service
- * Priority: Backend API → Yahoo Finance (XETRA, free) → Mock data
+ * Priority: Backend API → Yahoo Finance (free, worldwide) → Mock data
+ *
+ * Symbol resolution:
+ *  - Known DAX symbols (e.g. SAP) → tries SAP.DE first, falls back to SAP
+ *  - Full Yahoo symbols (e.g. AAPL, MSFT, APC.DE) → used as-is
  */
 import { api } from './api.js'
 import { MOCK_STOCKS, getStockBySymbol } from '../utils/mockData.js'
 
-const YAHOO_PROXY = 'https://query1.finance.yahoo.com/v8/finance/chart'
+const YAHOO_CHART  = 'https://query1.finance.yahoo.com/v8/finance/chart'
+const YAHOO_SEARCH = 'https://query1.finance.yahoo.com/v1/finance/search'
 
-// ── Yahoo Finance direct call ──────────────────────────────────────────────
+const DAX_SYMBOLS = new Set(MOCK_STOCKS.map(s => s.symbol))
+
+// Returns the Yahoo Finance symbol string(s) to try for a given app symbol
+function yahooSymbols(symbol) {
+  // Already looks like a full Yahoo symbol (contains dot or is ISIN-like)
+  if (symbol.includes('.')) return [symbol]
+  // Known DAX stock → prefer XETRA (.DE), fallback to bare symbol
+  if (DAX_SYMBOLS.has(symbol.toUpperCase())) return [`${symbol}.DE`, symbol]
+  // Unknown → try bare first (covers AAPL, MSFT, etc.), then .DE
+  return [symbol, `${symbol}.DE`]
+}
+
+// ── Yahoo Finance quote ────────────────────────────────────────────────────
 
 async function yahooQuote(symbol) {
-  try {
-    const res = await fetch(
-      `${YAHOO_PROXY}/${symbol}.DE?interval=1d&range=1d`,
-      { signal: AbortSignal.timeout(6000) }
-    )
-    if (!res.ok) return null
-    const json = await res.json()
-    const meta = json?.chart?.result?.[0]?.meta
-    if (!meta?.regularMarketPrice) return null
+  for (const ySymbol of yahooSymbols(symbol)) {
+    try {
+      const res = await fetch(
+        `${YAHOO_CHART}/${ySymbol}?interval=1d&range=1d`,
+        { signal: AbortSignal.timeout(6000) }
+      )
+      if (!res.ok) continue
+      const json = await res.json()
+      const meta = json?.chart?.result?.[0]?.meta
+      if (!meta?.regularMarketPrice) continue
 
-    const price     = parseFloat(meta.regularMarketPrice.toFixed(2))
-    const prevClose = parseFloat((meta.chartPreviousClose ?? meta.previousClose ?? price).toFixed(2))
-    const change    = parseFloat((price - prevClose).toFixed(2))
-    const changePct = parseFloat(((change / prevClose) * 100).toFixed(2))
+      const price     = parseFloat(meta.regularMarketPrice.toFixed(2))
+      const prevClose = parseFloat((meta.chartPreviousClose ?? meta.previousClose ?? price).toFixed(2))
+      const change    = parseFloat((price - prevClose).toFixed(2))
+      const changePct = parseFloat(((change / prevClose) * 100).toFixed(2))
+      const currency  = meta.currency || 'USD'
 
-    return {
-      symbol,
-      price,
-      change,
-      changePct,
-      high:      parseFloat((meta.regularMarketDayHigh  ?? price).toFixed(2)),
-      low:       parseFloat((meta.regularMarketDayLow   ?? price).toFixed(2)),
-      open:      parseFloat((meta.regularMarketOpen     ?? price).toFixed(2)),
-      prevClose,
+      return {
+        symbol,
+        yahooSymbol: ySymbol,
+        price,
+        change,
+        changePct,
+        currency,
+        high:      parseFloat((meta.regularMarketDayHigh ?? price).toFixed(2)),
+        low:       parseFloat((meta.regularMarketDayLow  ?? price).toFixed(2)),
+        open:      parseFloat((meta.regularMarketOpen    ?? price).toFixed(2)),
+        prevClose,
+        exchange:  meta.exchangeName || '',
+        name:      meta.longName || meta.shortName || symbol,
+      }
+    } catch {
+      continue
     }
-  } catch {
-    return null
   }
+  return null
 }
 
 async function yahooHistory(symbol, range) {
-  const rangeMap       = { '1W': '5d', '1M': '1mo', '3M': '3mo', '6M': '6mo', '1Y': '1y' }
-  const intervalMap    = { '1W': '1h',  '1M': '1d',  '3M': '1d',  '6M': '1d',  '1Y': '1d' }
-  const yahooRange     = rangeMap[range]     || '3mo'
-  const yahooInterval  = intervalMap[range]  || '1d'
+  const rangeMap    = { '1W': '5d', '1M': '1mo', '3M': '3mo', '6M': '6mo', '1Y': '1y' }
+  const intervalMap = { '1W': '1h',  '1M': '1d',  '3M': '1d',  '6M': '1d',  '1Y': '1d' }
+  const yahooRange    = rangeMap[range]    || '3mo'
+  const yahooInterval = intervalMap[range] || '1d'
 
+  for (const ySymbol of yahooSymbols(symbol)) {
+    try {
+      const res = await fetch(
+        `${YAHOO_CHART}/${ySymbol}?interval=${yahooInterval}&range=${yahooRange}`,
+        { signal: AbortSignal.timeout(8000) }
+      )
+      if (!res.ok) continue
+      const json       = await res.json()
+      const result     = json?.chart?.result?.[0]
+      const timestamps = result?.timestamp
+      const quotes     = result?.indicators?.quote?.[0]
+      if (!timestamps?.length || !quotes) continue
+
+      const candles = timestamps.map((ts, i) => ({
+        date:   new Date(ts * 1000).toISOString().split('T')[0],
+        open:   parseFloat((quotes.open[i]  ?? 0).toFixed(2)),
+        high:   parseFloat((quotes.high[i]  ?? 0).toFixed(2)),
+        low:    parseFloat((quotes.low[i]   ?? 0).toFixed(2)),
+        close:  parseFloat((quotes.close[i] ?? 0).toFixed(2)),
+        volume: quotes.volume[i] ?? 0,
+      })).filter(d => d.close > 0)
+
+      if (candles.length) return candles
+    } catch {
+      continue
+    }
+  }
+  return null
+}
+
+// ── Yahoo Finance search (worldwide) ──────────────────────────────────────
+
+async function yahooSearch(query) {
   try {
     const res = await fetch(
-      `${YAHOO_PROXY}/${symbol}.DE?interval=${yahooInterval}&range=${yahooRange}`,
-      { signal: AbortSignal.timeout(8000) }
+      `${YAHOO_SEARCH}?q=${encodeURIComponent(query)}&quotesCount=10&newsCount=0&enableFuzzyQuery=false`,
+      { signal: AbortSignal.timeout(5000) }
     )
     if (!res.ok) return null
-    const json      = await res.json()
-    const result    = json?.chart?.result?.[0]
-    const timestamps = result?.timestamp
-    const quotes    = result?.indicators?.quote?.[0]
-    if (!timestamps?.length || !quotes) return null
-
-    return timestamps.map((ts, i) => ({
-      date:   new Date(ts * 1000).toISOString().split('T')[0],
-      open:   parseFloat((quotes.open[i]  ?? 0).toFixed(2)),
-      high:   parseFloat((quotes.high[i]  ?? 0).toFixed(2)),
-      low:    parseFloat((quotes.low[i]   ?? 0).toFixed(2)),
-      close:  parseFloat((quotes.close[i] ?? 0).toFixed(2)),
-      volume: quotes.volume[i] ?? 0,
-    })).filter(d => d.close > 0)
+    const json    = await res.json()
+    const results = json?.quotes || []
+    return results
+      .filter(r => r.quoteType === 'EQUITY' || r.quoteType === 'ETF')
+      .slice(0, 10)
+      .map(r => ({
+        symbol:   r.symbol.replace(/\.DE$/, '') || r.symbol,
+        yahooSymbol: r.symbol,
+        name:     r.longname || r.shortname || r.symbol,
+        exchange: r.exchDisp || r.exchange || '',
+        type:     r.quoteType || 'EQUITY',
+      }))
   } catch {
     return null
   }
@@ -82,6 +138,7 @@ function _mockQuote(symbol) {
   return {
     symbol,
     price,
+    currency: 'EUR',
     change:    parseFloat((price - prevClose).toFixed(2)),
     changePct: parseFloat(((price - prevClose) / prevClose * 100).toFixed(2)),
     high:      parseFloat((price * 1.005).toFixed(2)),
@@ -101,7 +158,7 @@ export const stockService = {
       if (data?.price) return data
     } catch {}
 
-    // 2. Yahoo Finance (XETRA, free)
+    // 2. Yahoo Finance (worldwide, free)
     const yq = await yahooQuote(symbol)
     if (yq) return yq
 
@@ -140,7 +197,11 @@ export const stockService = {
       if (data?.length) return data
     } catch {}
 
-    // 2. Mock search
+    // 2. Yahoo Finance search (worldwide)
+    const yahooResults = await yahooSearch(query)
+    if (yahooResults?.length) return yahooResults
+
+    // 3. Mock search (DAX only fallback)
     const q = query.toLowerCase()
     return MOCK_STOCKS.filter(
       s => s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)
@@ -161,7 +222,7 @@ export const stockService = {
       }
     } catch {}
 
-    // Yahoo Finance: fetch all quotes in parallel
+    // Yahoo Finance: fetch all DAX quotes in parallel
     const quotes = await Promise.all(symbols.map(s => yahooQuote(s)))
     const valid  = quotes.filter(Boolean)
     if (valid.length >= 5) {
