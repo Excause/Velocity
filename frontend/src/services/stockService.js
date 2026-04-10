@@ -1,77 +1,71 @@
 /**
  * Stock Service
- * Priority: Backend API → Finnhub (direct, if key set) → Mock data
- *
- * For German XETRA stocks, Finnhub uses the ":XETRA" suffix.
- * A free Finnhub key can be set in Settings.
+ * Priority: Backend API → Yahoo Finance (XETRA, free) → Mock data
  */
 import { api } from './api.js'
-import { storageService } from './storageService.js'
 import { MOCK_STOCKS, getStockBySymbol } from '../utils/mockData.js'
 
-const FINNHUB_BASE = 'https://finnhub.io/api/v1'
+const YAHOO_PROXY = 'https://query1.finance.yahoo.com/v8/finance/chart'
 
-function toFinnhubSymbol(symbol) {
-  return `${symbol}:XETRA`
-}
+// ── Yahoo Finance direct call ──────────────────────────────────────────────
 
-// ── Finnhub direct call ────────────────────────────────────────────────────
-
-async function finnhubQuote(symbol) {
-  const { finnhubKey } = storageService.getSettings()
-  if (!finnhubKey) return null
-
+async function yahooQuote(symbol) {
   try {
-    const fhSym = toFinnhubSymbol(symbol)
-    const res   = await fetch(
-      `${FINNHUB_BASE}/quote?symbol=${fhSym}&token=${finnhubKey}`,
-      { signal: AbortSignal.timeout(5000) }
+    const res = await fetch(
+      `${YAHOO_PROXY}/${symbol}.DE?interval=1d&range=1d`,
+      { signal: AbortSignal.timeout(6000) }
     )
     if (!res.ok) return null
-    const d = await res.json()
-    if (!d.c || d.c <= 0) return null
+    const json = await res.json()
+    const meta = json?.chart?.result?.[0]?.meta
+    if (!meta?.regularMarketPrice) return null
+
+    const price     = parseFloat(meta.regularMarketPrice.toFixed(2))
+    const prevClose = parseFloat((meta.chartPreviousClose ?? meta.previousClose ?? price).toFixed(2))
+    const change    = parseFloat((price - prevClose).toFixed(2))
+    const changePct = parseFloat(((change / prevClose) * 100).toFixed(2))
+
     return {
       symbol,
-      price:     d.c,
-      change:    d.d,
-      changePct: d.dp,
-      high:      d.h,
-      low:       d.l,
-      open:      d.o,
-      prevClose: d.pc,
+      price,
+      change,
+      changePct,
+      high:      parseFloat((meta.regularMarketDayHigh  ?? price).toFixed(2)),
+      low:       parseFloat((meta.regularMarketDayLow   ?? price).toFixed(2)),
+      open:      parseFloat((meta.regularMarketOpen     ?? price).toFixed(2)),
+      prevClose,
     }
   } catch {
     return null
   }
 }
 
-async function finnhubCandles(symbol, range) {
-  const { finnhubKey } = storageService.getSettings()
-  if (!finnhubKey) return null
-
-  const now        = Math.floor(Date.now() / 1000)
-  const secondsMap = { '1W': 7*86400, '1M': 30*86400, '3M': 90*86400, '6M': 180*86400, '1Y': 365*86400 }
-  const resolution = range === '1W' ? '60' : 'D'
-  const from       = now - (secondsMap[range] || secondsMap['3M'])
+async function yahooHistory(symbol, range) {
+  const rangeMap       = { '1W': '5d', '1M': '1mo', '3M': '3mo', '6M': '6mo', '1Y': '1y' }
+  const intervalMap    = { '1W': '1h',  '1M': '1d',  '3M': '1d',  '6M': '1d',  '1Y': '1d' }
+  const yahooRange     = rangeMap[range]     || '3mo'
+  const yahooInterval  = intervalMap[range]  || '1d'
 
   try {
-    const fhSym = toFinnhubSymbol(symbol)
-    const res   = await fetch(
-      `${FINNHUB_BASE}/stock/candle?symbol=${fhSym}&resolution=${resolution}&from=${from}&to=${now}&token=${finnhubKey}`,
+    const res = await fetch(
+      `${YAHOO_PROXY}/${symbol}.DE?interval=${yahooInterval}&range=${yahooRange}`,
       { signal: AbortSignal.timeout(8000) }
     )
     if (!res.ok) return null
-    const d = await res.json()
-    if (d.s !== 'ok' || !d.c?.length) return null
+    const json      = await res.json()
+    const result    = json?.chart?.result?.[0]
+    const timestamps = result?.timestamp
+    const quotes    = result?.indicators?.quote?.[0]
+    if (!timestamps?.length || !quotes) return null
 
-    return d.t.map((ts, i) => ({
+    return timestamps.map((ts, i) => ({
       date:   new Date(ts * 1000).toISOString().split('T')[0],
-      open:   parseFloat(d.o[i].toFixed(2)),
-      high:   parseFloat(d.h[i].toFixed(2)),
-      low:    parseFloat(d.l[i].toFixed(2)),
-      close:  parseFloat(d.c[i].toFixed(2)),
-      volume: d.v[i],
-    }))
+      open:   parseFloat((quotes.open[i]  ?? 0).toFixed(2)),
+      high:   parseFloat((quotes.high[i]  ?? 0).toFixed(2)),
+      low:    parseFloat((quotes.low[i]   ?? 0).toFixed(2)),
+      close:  parseFloat((quotes.close[i] ?? 0).toFixed(2)),
+      volume: quotes.volume[i] ?? 0,
+    })).filter(d => d.close > 0)
   } catch {
     return null
   }
@@ -107,9 +101,9 @@ export const stockService = {
       if (data?.price) return data
     } catch {}
 
-    // 2. Finnhub direct
-    const fh = await finnhubQuote(symbol)
-    if (fh) return fh
+    // 2. Yahoo Finance (XETRA, free)
+    const yq = await yahooQuote(symbol)
+    if (yq) return yq
 
     // 3. Mock
     return _mockQuote(symbol)
@@ -127,8 +121,8 @@ export const stockService = {
       if (data?.length) return data
     } catch {}
 
-    // 2. Finnhub candles
-    const candles = await finnhubCandles(symbol, range)
+    // 2. Yahoo Finance candles
+    const candles = await yahooHistory(symbol, range)
     if (candles?.length) return candles
 
     // 3. Mock
@@ -146,26 +140,7 @@ export const stockService = {
       if (data?.length) return data
     } catch {}
 
-    // 2. Finnhub symbol search
-    const { finnhubKey } = storageService.getSettings()
-    if (finnhubKey) {
-      try {
-        const res = await fetch(
-          `${FINNHUB_BASE}/search?q=${encodeURIComponent(query)}&token=${finnhubKey}`,
-          { signal: AbortSignal.timeout(5000) }
-        )
-        if (res.ok) {
-          const d = await res.json()
-          const results = (d.result || [])
-            .filter(r => r.type === 'Common Stock')
-            .slice(0, 10)
-            .map(r => ({ symbol: r.symbol.replace(':XETRA', ''), name: r.description, exchange: r.primaryExchange }))
-          if (results.length) return results
-        }
-      } catch {}
-    }
-
-    // 3. Mock search
+    // 2. Mock search
     const q = query.toLowerCase()
     return MOCK_STOCKS.filter(
       s => s.symbol.toLowerCase().includes(q) || s.name.toLowerCase().includes(q)
@@ -173,14 +148,12 @@ export const stockService = {
   },
 
   async getAllStocks() {
-    // Try to get live quotes for all tracked symbols
     const symbols = MOCK_STOCKS.map(s => s.symbol)
 
     // Backend batch
     try {
       const data = await api.get(`/stocks/batch?symbols=${symbols.join(',')}`)
       if (data?.length) {
-        // Merge with mock for missing fields (name, sector, etc.)
         return data.map(q => {
           const mock = getStockBySymbol(q.symbol)
           return { ...mock, ...q }
@@ -188,17 +161,14 @@ export const stockService = {
       }
     } catch {}
 
-    // Finnhub: quote each (rate-limit aware: max 10 parallel)
-    const { finnhubKey } = storageService.getSettings()
-    if (finnhubKey) {
-      const quotes = await Promise.all(symbols.slice(0, 20).map(s => finnhubQuote(s)))
-      const valid  = quotes.filter(Boolean)
-      if (valid.length >= 5) {
-        return valid.map(q => {
-          const mock = getStockBySymbol(q.symbol)
-          return { ...mock, ...q }
-        })
-      }
+    // Yahoo Finance: fetch all quotes in parallel
+    const quotes = await Promise.all(symbols.map(s => yahooQuote(s)))
+    const valid  = quotes.filter(Boolean)
+    if (valid.length >= 5) {
+      return valid.map(q => {
+        const mock = getStockBySymbol(q.symbol)
+        return { ...mock, ...q }
+      })
     }
 
     // Mock fallback
@@ -220,21 +190,6 @@ export const stockService = {
   async getDetails(symbol) {
     const quote = await this.getQuote(symbol)
     const mock  = getStockBySymbol(symbol)
-
-    // Finnhub company profile
-    const { finnhubKey } = storageService.getSettings()
-    if (finnhubKey) {
-      try {
-        const res = await fetch(
-          `${FINNHUB_BASE}/stock/profile2?symbol=${toFinnhubSymbol(symbol)}&token=${finnhubKey}`,
-          { signal: AbortSignal.timeout(5000) }
-        )
-        if (res.ok) {
-          const d = await res.json()
-          if (d.name) return { ...mock, ...quote, ...d }
-        }
-      } catch {}
-    }
     return { ...mock, ...quote }
   },
 
