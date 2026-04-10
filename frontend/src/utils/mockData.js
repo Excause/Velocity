@@ -427,6 +427,14 @@ export function generateBacktestData(startCapital = 10000, days = 90) {
   return data
 }
 
+// ─── Initial Portfolio (Simulator) ────────────────────────────────────────────
+export const INITIAL_PORTFOLIO = {
+  cash:         10000,
+  positions:    [],
+  transactions: [],
+  createdAt:    new Date().toISOString(),
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 export function getStockBySymbol(symbol) {
   return MOCK_STOCKS.find(s => s.symbol === symbol)
