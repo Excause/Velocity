@@ -1,13 +1,13 @@
 /**
  * Central API client – all requests go through here.
  * In dev: Vite proxy forwards /api → http://localhost:5000
- * In prod: window.VELOCITY_API_BASE or same-origin /api
+ * In prod: VITE_API_BASE env var (set to Render.com URL)
  */
 
 const BASE =
-  typeof window !== 'undefined' && window.VELOCITY_API_BASE
-    ? window.VELOCITY_API_BASE
-    : '/api'
+  import.meta.env.VITE_API_BASE ||
+  (typeof window !== 'undefined' && window.VELOCITY_API_BASE) ||
+  '/api'
 
 async function request(path, options = {}) {
   const url = `${BASE}${path}`
