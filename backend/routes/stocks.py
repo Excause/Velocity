@@ -117,7 +117,7 @@ def search_stocks():
 
 @stocks_bp.route('/batch')
 def get_batch():
-    """Return quotes for all tracked symbols."""
+    """Return quotes for all tracked symbols using parallel yfinance download."""
     from ..config import config
     yf = _get_yf()
     if not yf:
@@ -126,23 +126,47 @@ def get_batch():
     symbols = request.args.get('symbols', '').split(',') if request.args.get('symbols') else config.TRACKED_SYMBOLS[:30]
     symbols = [s.strip().upper() for s in symbols if s.strip()]
 
-    results = []
-    for sym in symbols:
-        try:
-            yf_sym = config.to_yahoo_symbol(sym)
-            ticker = yf.Ticker(yf_sym)
-            info   = ticker.fast_info
-            price  = float(info.last_price or 0)
-            prev   = float(info.previous_close or price)
-            if price > 0:
+    try:
+        import pandas as pd
+        # yfinance.download fetches all symbols in one HTTP request — much faster
+        yf_symbols = [config.to_yahoo_symbol(s) for s in symbols]
+        raw = yf.download(
+            tickers=yf_symbols,
+            period='2d',
+            interval='1d',
+            group_by='ticker',
+            auto_adjust=True,
+            progress=False,
+            timeout=20,
+        )
+
+        results = []
+        for sym, yf_sym in zip(symbols, yf_symbols):
+            try:
+                if len(yf_symbols) == 1:
+                    df = raw
+                else:
+                    df = raw[yf_sym] if yf_sym in raw.columns.get_level_values(0) else pd.DataFrame()
+
+                if df.empty or len(df) < 1:
+                    continue
+
+                price = float(df['Close'].iloc[-1])
+                prev  = float(df['Close'].iloc[-2]) if len(df) >= 2 else price
+                if price <= 0:
+                    continue
+
                 results.append({
                     'symbol':    sym,
                     'price':     round(price, 2),
                     'change':    round(price - prev, 2),
                     'changePct': round((price - prev) / prev * 100, 2) if prev else 0,
-                    'volume':    int(info.three_month_average_volume or 0),
+                    'volume':    int(df['Volume'].iloc[-1]) if 'Volume' in df.columns else 0,
                 })
-        except Exception:
-            continue
+            except Exception:
+                continue
 
-    return jsonify(results)
+        return jsonify(results)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

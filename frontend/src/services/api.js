@@ -11,10 +11,15 @@ const BASE =
 
 async function request(path, options = {}) {
   const url = `${BASE}${path}`
+  const timeout = options.timeout || 15000
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeout)
+
   const res = await fetch(url, {
     headers: { 'Content-Type': 'application/json', ...options.headers },
+    signal: controller.signal,
     ...options,
-  })
+  }).finally(() => clearTimeout(timer))
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error(err.error || `HTTP ${res.status}`)

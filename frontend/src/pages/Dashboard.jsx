@@ -40,16 +40,21 @@ export default function Dashboard() {
 
   async function loadData() {
     setLoading(true)
-    const [movers, latestNews, recs] = await Promise.all([
-      stockService.getTopMovers(),
-      newsService.getNews({ limit: 5 }),
-      aiService.getRecommendations('moderate'),
-    ])
-    setTopMovers(movers)
-    setNews(latestNews)
-    setRecommendations(recs.slice(0, 4))
-    setBacktestData(generateBacktestData(10000, 60))
-    setLoading(false)
+    try {
+      const [movers, latestNews, recs] = await Promise.all([
+        stockService.getTopMovers(),
+        newsService.getNews({ limit: 5 }),
+        aiService.getRecommendations('moderate'),
+      ])
+      setTopMovers(movers)
+      setNews(latestNews)
+      setRecommendations(recs.slice(0, 4))
+      setBacktestData(generateBacktestData(10000, 60))
+    } catch (err) {
+      console.error('Dashboard load error:', err)
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function refresh() {
