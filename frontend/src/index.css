@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-bg-primary text-gray-100;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-bg-secondary;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-600 rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gray-500;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-bg-card border border-border rounded-xl p-4;
+  }
+  .card-elevated {
+    @apply bg-bg-elevated border border-border rounded-xl p-4;
+  }
+  .btn-primary {
+    @apply bg-accent-blue hover:bg-accent-blue-hover text-white font-medium px-4 py-2 rounded-lg transition-colors duration-150;
+  }
+  .btn-ghost {
+    @apply text-gray-400 hover:text-gray-200 hover:bg-bg-elevated px-3 py-2 rounded-lg transition-all duration-150;
+  }
+  .badge-bull {
+    @apply bg-bull-dim text-bull-text text-xs font-semibold px-2 py-0.5 rounded-full;
+  }
+  .badge-bear {
+    @apply bg-bear-dim text-bear-text text-xs font-semibold px-2 py-0.5 rounded-full;
+  }
+  .badge-watch {
+    @apply bg-watch-dim text-watch-text text-xs font-semibold px-2 py-0.5 rounded-full;
+  }
+  .stat-positive {
+    @apply text-bull font-mono text-sm font-medium;
+  }
+  .stat-negative {
+    @apply text-bear font-mono text-sm font-medium;
+  }
+  .input-dark {
+    @apply bg-bg-elevated border border-border rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-accent-blue transition-colors;
+  }
+  .nav-link {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-gray-400 hover:text-gray-100 hover:bg-bg-elevated transition-all duration-150 text-sm font-medium;
+  }
+  .nav-link-active {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-white bg-accent-blue text-sm font-medium;
+  }
+}
+
+/* Custom animations */
+@keyframes ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.ticker-animate {
+  animation: ticker 40s linear infinite;
+}
+
+/* Price flash animations */
+@keyframes flashGreen {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(16, 185, 129, 0.2); }
+}
+@keyframes flashRed {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(239, 68, 68, 0.2); }
+}
+.flash-green { animation: flashGreen 0.6s ease-out; }
+.flash-red { animation: flashRed 0.6s ease-out; }
+
+/* Recharts overrides */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: #1A2236 !important;
+  border-color: #1F2937 !important;
+  border-radius: 8px !important;
+}
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: #1F2937 !important;
+}
