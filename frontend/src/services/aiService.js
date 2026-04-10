@@ -1,135 +1,37 @@
-import { MOCK_RECOMMENDATIONS } from '../utils/mockData.js'
+/**
+ * AI Service – calls backend /api/ai
+ * Falls back to mock data when backend is unreachable.
+ */
+import { api } from './api.js'
 import { storageService } from './storageService.js'
 
 export const aiService = {
   async getRecommendations(riskProfile = 'moderate') {
-    const riskMap = {
-      conservative: ['low'],
-      moderate:     ['low', 'medium'],
-      aggressive:   ['low', 'medium', 'high'],
-    }
-    const allowed = riskMap[riskProfile] || riskMap.moderate
-    return MOCK_RECOMMENDATIONS.filter(r => allowed.includes(r.riskLevel))
+    try {
+      const data = await api.get(`/ai/recommendations?riskProfile=${riskProfile}`)
+      if (data && Array.isArray(data) && data.length) return data
+    } catch {}
+    // Fallback when DB is empty or backend unreachable
+    return _getMockRecommendations(riskProfile)
   },
 
-  async analyzeStock(symbol, newsContext = []) {
-    const settings = storageService.getSettings()
-    const anthropicKey = settings.anthropicKey
-
-    if (!anthropicKey) {
-      return getMockAnalysis(symbol)
-    }
-
+  async analyzeStock(symbol, _newsContext = []) {
     try {
-      const newsText = newsContext
-        .slice(0, 5)
-        .map(n => `- ${n.title}: ${n.summary}`)
-        .join('\n')
-
-      const prompt = `Du bist ein erfahrener Börsenanalyst mit Schwerpunkt auf deutschen und europäischen Aktien (XETRA/Frankfurt). Analysiere die Aktie ${symbol} (XETRA) anhand folgender aktueller Nachrichten:
-
-${newsText || 'Keine spezifischen Nachrichten verfügbar.'}
-
-Erstelle eine strukturierte Analyse auf Deutsch mit:
-1. Handlungsempfehlung: "buy" | "sell" | "watch"
-2. Konfidenz: 0–100
-3. Kursziel in EUR (12 Monate)
-4. Zeithorizont: "1-3 Monate" | "3-6 Monate" | "6-12 Monate"
-5. Risiko: "low" | "medium" | "high"
-6. Begründung (3 Sätze, Deutsch)
-7. Katalysatoren: 3 Punkte
-8. Risiken: 3 Punkte
-
-Berücksichtige dabei: DAX-Umfeld, EZB-Zinspolitik, Konjunktur Deutschland/Europa, Branchentrends.
-Antworte NUR als gültiges JSON-Objekt.`
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-calls': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-opus-4-6',
-          max_tokens: 1024,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-      })
-
-      if (!response.ok) throw new Error(`API Error ${response.status}`)
-      const data = await response.json()
-      const text = data.content[0].text
-
-      try {
-        const jsonMatch = text.match(/\{[\s\S]*\}/)
-        if (jsonMatch) return JSON.parse(jsonMatch[0])
-      } catch {}
-      return { reasoning: text, action: 'watch', confidence: 60 }
-    } catch (e) {
-      console.warn('Claude API Fehler:', e.message)
-      return getMockAnalysis(symbol)
-    }
+      const data = await api.post('/ai/analyze', { symbol })
+      if (data && data.action) return data
+    } catch {}
+    return getMockAnalysis(symbol)
   },
 
   async generateMorningReport(recommendations, topNews) {
-    const settings = storageService.getSettings()
-    const anthropicKey = settings.anthropicKey
-
-    if (!anthropicKey) {
-      return getMockMorningReport(recommendations, topNews)
-    }
-
     try {
-      const recoText = recommendations
-        .slice(0, 5)
-        .map(r => `${r.symbol}: ${r.action.toUpperCase()} (Konfidenz: ${r.confidence}%)`)
-        .join('\n')
-
-      const newsText = topNews
-        .slice(0, 5)
-        .map(n => `- ${n.title}`)
-        .join('\n')
-
-      const prompt = `Erstelle einen prägnanten Börsenmorgen-Report für DAX-Investoren.
-
-Datum: ${new Date().toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-
-Heutige KI-Empfehlungen (XETRA):
-${recoText}
-
-Wichtigste Nachrichten:
-${newsText}
-
-Format:
-1. Kurzer Marktausblick für den DAX (2 Sätze)
-2. Top-Empfehlung mit Begründung (2 Sätze)
-3. Wichtigstes Risiko heute (1 Satz)
-
-Stil: Professionell, präzise, auf den Punkt. Max. 150 Wörter.`
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-calls': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-opus-4-6',
-          max_tokens: 512,
-          messages: [{ role: 'user', content: prompt }],
-        }),
+      const data = await api.post('/ai/morning-report', {
+        recommendations,
+        news: topNews,
       })
-
-      if (!response.ok) throw new Error()
-      const data = await response.json()
-      return data.content[0].text
-    } catch {
-      return getMockMorningReport(recommendations, topNews)
-    }
+      if (data && data.report) return data.report
+    } catch {}
+    return getMockMorningReport(recommendations, topNews)
   },
 
   saveFeedback(recommendationId, rating) {
@@ -137,36 +39,55 @@ Stil: Professionell, präzise, auf den Punkt. Max. 150 Wörter.`
   },
 }
 
-// ─── Mock-Analysen für Demo-Modus ─────────────────────────────────────────────
-function getMockAnalysis(symbol) {
+// ── Mock fallbacks ─────────────────────────────────────────────────────────────
+
+function _getMockRecommendations(riskProfile) {
+  const riskMap = {
+    conservative: ['low'],
+    moderate:     ['low', 'medium'],
+    aggressive:   ['low', 'medium', 'high'],
+  }
+  const allowed = riskMap[riskProfile] || riskMap.moderate
+  return MOCK_RECOMMENDATIONS.filter(r => allowed.includes(r.riskLevel))
+}
+
+const MOCK_RECOMMENDATIONS = [
+  { id: 1, symbol: 'SAP',  action: 'buy',   confidence: 88, riskLevel: 'low',    reasoning: 'SAP transformiert sich erfolgreich in eine Cloud-Plattform.', catalysts: ['Cloud-ARR', 'Business AI', 'RISE with SAP'], risks: ['IT-Budgetkürzungen', 'Migrations-Verzögerungen'], timeHorizon: '3-6M', generatedDate: new Date().toISOString().split('T')[0] },
+  { id: 2, symbol: 'IFX',  action: 'buy',   confidence: 79, riskLevel: 'medium', reasoning: 'Infineon positioniert sich ideal im Halbleiterzyklus-Aufschwung.', catalysts: ['E-Mobilität', 'KI-Server', 'SiC'], risks: ['Zyklusrisiko', 'China'], timeHorizon: '3-6M', generatedDate: new Date().toISOString().split('T')[0] },
+  { id: 3, symbol: 'BAYN', action: 'sell',  confidence: 72, riskLevel: 'high',   reasoning: 'Bayer bleibt durch Glyphosat-Verbindlichkeiten strukturell belastet.', catalysts: ['Vergleich', 'Pipeline'], risks: ['Rechtsrisiken', 'Verschuldung'], timeHorizon: '1-3M', generatedDate: new Date().toISOString().split('T')[0] },
+  { id: 4, symbol: 'ALV',  action: 'buy',   confidence: 82, riskLevel: 'low',    reasoning: 'Allianz überzeugt mit Rekordgewinnen und attraktiver Dividende.', catalysts: ['Dividende', 'Rückkauf', 'Zinsen'], risks: ['Großkatastrophen', 'Regulierung'], timeHorizon: '6-12M', generatedDate: new Date().toISOString().split('T')[0] },
+  { id: 5, symbol: 'VOW3', action: 'watch', confidence: 55, riskLevel: 'medium', reasoning: 'VW handelt günstig, aber strukturelle Herausforderungen begrenzen Potenzial.', catalysts: ['Sparprogramm', 'China', 'Software'], risks: ['BYD-Wettbewerb', 'E-Auto-Nachfrage', 'Gewerkschaft'], timeHorizon: '3-6M', generatedDate: new Date().toISOString().split('T')[0] },
+]
+
+export function getMockAnalysis(symbol) {
   const analyses = {
-    SAP:   { action: 'buy',   confidence: 88, reasoning: 'SAP transformiert sich erfolgreich in eine Cloud-Plattform. KI-Integration in S/4HANA bietet nachhaltiges Wachstumspotenzial. Bewertung trotz Anstieg noch attraktiv vs. globalen Software-Peers.', catalysts: ['Cloud-ARR Wachstum', 'Business AI', 'RISE with SAP'], risks: ['IT-Budgetkürzungen', 'Migrations-Verzögerungen'] },
-    IFX:   { action: 'buy',   confidence: 79, reasoning: 'Infineon positioniert sich ideal im Halbleiterzyklus-Aufschwung 2025. SiC-Technologie für E-Fahrzeuge und KI-Infrastruktur sind Wachstumstreiber. Bewertung nach Korrektur attraktiv.', catalysts: ['E-Mobilität Erholung', 'KI-Server', 'SiC-Kapazitäten'], risks: ['Zyklusrisiko', 'China-Exposure'] },
-    BAYN:  { action: 'sell',  confidence: 72, reasoning: 'Bayer bleibt durch Glyphosat-Verbindlichkeiten strukturell belastet. Pharmapipeline bietet keine kurzfristige Entlastung. Bewertungsrisiko überwiegt Katalysator-Potenzial.', catalysts: ['Glyphosat-Vergleich', 'Pharma-Pipeline'], risks: ['Rechtsverbindlichkeiten', 'Verschuldung', 'Pipeline-Rückschläge'] },
-    ALV:   { action: 'buy',   confidence: 82, reasoning: 'Allianz überzeugt mit Rekordgewinnen und attraktiver Dividendenrendite. Zinsnormalisierung verbessert Kapitalanlage-Ergebnisse strukturell. Defensiver DAX-Anker.', catalysts: ['Dividendenerhöhung', 'Aktienrückkauf', 'Zinsnormalisierung'], risks: ['Großkatastrophen', 'Regulierung'] },
-    VOW3:  { action: 'watch', confidence: 55, reasoning: 'VW handelt auf historisch günstiger Bewertung, aber strukturelle Herausforderungen in der E-Mobilität begrenzen kurzfristiges Aufwärtspotenzial. Restrukturierungserfolg entscheidend.', catalysts: ['Sparprogramm', 'China-Erholung', 'Software-Integration'], risks: ['BYD-Wettbewerb', 'Nachfrageschwäche E-Autos', 'Gewerkschaft'] },
+    SAP:   { action: 'buy',   confidence: 88, reasoning: 'SAP transformiert sich erfolgreich in eine Cloud-Plattform. KI-Integration in S/4HANA bietet nachhaltiges Wachstumspotenzial.', catalysts: ['Cloud-ARR Wachstum', 'Business AI', 'RISE with SAP'], risks: ['IT-Budgetkürzungen', 'Migrations-Verzögerungen'], riskLevel: 'low',    timeHorizon: '3-6M' },
+    IFX:   { action: 'buy',   confidence: 79, reasoning: 'Infineon positioniert sich ideal im Halbleiterzyklus-Aufschwung 2025. SiC-Technologie ist ein Wachstumstreiber.',            catalysts: ['E-Mobilität Erholung', 'KI-Server', 'SiC-Kapazitäten'], risks: ['Zyklusrisiko', 'China-Exposure'], riskLevel: 'medium', timeHorizon: '3-6M' },
+    BAYN:  { action: 'sell',  confidence: 72, reasoning: 'Bayer bleibt durch Glyphosat-Verbindlichkeiten strukturell belastet. Pharmapipeline bietet keine kurzfristige Entlastung.', catalysts: ['Glyphosat-Vergleich', 'Pharma-Pipeline'], risks: ['Rechtsverbindlichkeiten', 'Verschuldung', 'Pipeline-Rückschläge'], riskLevel: 'high', timeHorizon: '1-3M' },
+    ALV:   { action: 'buy',   confidence: 82, reasoning: 'Allianz überzeugt mit Rekordgewinnen und attraktiver Dividendenrendite. Defensiver DAX-Anker.',                            catalysts: ['Dividendenerhöhung', 'Aktienrückkauf', 'Zinsnormalisierung'], risks: ['Großkatastrophen', 'Regulierung'], riskLevel: 'low', timeHorizon: '6-12M' },
+    VOW3:  { action: 'watch', confidence: 55, reasoning: 'VW handelt auf historisch günstiger Bewertung, aber strukturelle Herausforderungen begrenzen kurzfristiges Potenzial.',    catalysts: ['Sparprogramm', 'China-Erholung', 'Software-Integration'], risks: ['BYD-Wettbewerb', 'E-Auto-Nachfrage', 'Gewerkschaft'], riskLevel: 'medium', timeHorizon: '3-6M' },
   }
   return analyses[symbol] || {
-    action: 'watch',
-    confidence: 62,
-    reasoning: 'Marktlage erfordert sorgfältige Beobachtung. DAX-Umfeld bleibt von EZB-Politik und globaler Konjunktur abhängig. Diversifikation empfohlen.',
+    action: 'watch', confidence: 62,
+    reasoning: 'Marktlage erfordert sorgfältige Beobachtung. DAX-Umfeld abhängig von EZB-Politik.',
     catalysts: ['EZB-Zinssenkungen', 'Konjunkturerholung', 'Sektor-Rotation'],
-    risks: ['Rezessionsrisiko Deutschland', 'Geopolitik', 'Energiepreise'],
+    risks:     ['Rezessionsrisiko Deutschland', 'Geopolitik', 'Energiepreise'],
+    riskLevel: 'medium', timeHorizon: '3-6M',
   }
 }
 
 function getMockMorningReport(recommendations, _topNews) {
   const buyRecs = recommendations.filter(r => r.action === 'buy')
-  const topRec = buyRecs[0]
-  const today = new Date().toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
+  const topRec  = buyRecs[0]
+  const today   = new Date().toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
 
-  return `📊 **Velocity DAX-Report** – ${today}
+  return `**Velocity DAX-Report** – ${today}
 
-**Marktausblick:** Der DAX dürfte moderat fester eröffnen. EZB-Zinssenkungserwartungen stützen das Sentiment, während schwache Industrie-PMI-Daten die Aufwärtsbewegung begrenzen.
+**Marktausblick:** Der DAX dürfte moderat fester eröffnen. EZB-Zinssenkungserwartungen stützen das Sentiment.
 
-**Top-Empfehlung:** ${topRec ? `**${topRec.symbol}** (${topRec.action.toUpperCase()}) – ${topRec.reasoning.split('.')[0]}.` : 'Defensive Sektoren bevorzugen.'} Konfidenz: ${topRec?.confidence || 70}%.
+**Top-Empfehlung:** ${topRec ? `**${topRec.symbol}** (${topRec.action.toUpperCase()}) – ${topRec.reasoning?.split('.')[0]}.` : 'Defensive Sektoren bevorzugen.'} Konfidenz: ${topRec?.confidence || 70}%.
 
-**Hauptrisiko heute:** Bundesbank-Kommentare zur Konjunkturlage und US-Handelsbilanzdaten (14:30 Uhr) könnten für Volatilität sorgen.
+**Hauptrisiko heute:** Makrodaten und US-Handelsbilanz könnten für Volatilität sorgen.
 
-*Diese Analyse basiert auf KI-generierten Signalen. Keine Anlageberatung – bitte eigene Due Diligence durchführen.*`
+*Diese Analyse basiert auf KI-generierten Signalen. Keine Anlageberatung.*`
 }

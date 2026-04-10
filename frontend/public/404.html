@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Velocity</title>
+  <script>
+    // GitHub Pages SPA redirect: encode the path into sessionStorage and redirect to root
+    var l = window.location;
+    var segmentCount = 1; // number of path segments in the base URL (1 for /Velocity)
+    sessionStorage.redirect = l.pathname.slice(1).split('/').slice(segmentCount).join('/') + l.search + l.hash;
+    l.replace(l.protocol + '//' + l.hostname + (l.port ? ':' + l.port : '') + l.pathname.split('/').slice(0, 1 + segmentCount).join('/') + '/?p=1');
+  </script>
+</head>
+<body></body>
+</html>
