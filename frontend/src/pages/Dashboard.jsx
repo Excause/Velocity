@@ -1,14 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { TrendingUp, TrendingDown, Brain, Newspaper, Activity, ArrowRight, RefreshCw } from 'lucide-react'
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, Cell } from 'recharts'
+import { TrendingUp, Brain, Newspaper, Activity, ArrowRight, RefreshCw } from 'lucide-react'
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { useAppStore } from '../store/appStore.js'
 import { stockService } from '../services/stockService.js'
 import { newsService } from '../services/newsService.js'
 import { aiService } from '../services/aiService.js'
 import { MOCK_SECTORS, generateBacktestData } from '../utils/mockData.js'
-import { formatPriceCompact, formatChangePct, formatMarketCap, actionColor, actionLabel, colorForChange } from '../utils/formatters.js'
-import { clsx } from 'clsx'
+import { formatPriceCompact, formatChangePct, actionLabel } from '../utils/formatters.js'
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null
@@ -25,7 +24,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 }
 
 export default function Dashboard() {
-  const { watchlist, getPortfolioValue, portfolio } = useAppStore()
+  const { getPortfolioValue, portfolio } = useAppStore()
   const [topMovers, setTopMovers] = useState({ gainers: [], losers: [] })
   const [news, setNews] = useState([])
   const [recommendations, setRecommendations] = useState([])
@@ -137,7 +136,7 @@ export default function Dashboard() {
               <XAxis dataKey="date" tick={{ fill: '#6B7280', fontSize: 10 }} tickLine={false} axisLine={false} interval={9} />
               <YAxis tick={{ fill: '#6B7280', fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `$${(v/1000).toFixed(1)}k`} />
               <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="spPortfolio" name="S&P 500" stroke="#6B7280" strokeWidth={1.5} fill="url(#spGrad)" />
+              <Area type="monotone" dataKey="spPortfolio" name="DAX" stroke="#6B7280" strokeWidth={1.5} fill="url(#spGrad)" />
               <Area type="monotone" dataKey="aiPortfolio" name="Velocity KI" stroke="#3B82F6" strokeWidth={2} fill="url(#aiGrad)" />
             </AreaChart>
           </ResponsiveContainer>

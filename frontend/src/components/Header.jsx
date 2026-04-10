@@ -40,7 +40,8 @@ export default function Header() {
     const now = new Date()
     const h = now.getHours()
     const day = now.getDay()
-    return day >= 1 && day <= 5 && h >= 15 && h < 22 // NYSE hours in CET
+    // XETRA Handelszeiten: Mo–Fr 09:00–17:30 Uhr (MEZ/MESZ)
+    return day >= 1 && day <= 5 && h >= 9 && (h < 17 || (h === 17 && now.getMinutes() <= 30))
   }
 
   return (
@@ -52,7 +53,7 @@ export default function Header() {
             <div key={i} className="flex items-center gap-2 whitespace-nowrap">
               <span className="text-xs font-medium text-gray-400">{idx.name}</span>
               <span className="text-xs font-mono font-semibold text-gray-200">
-                {idx.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {idx.value.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
               <span className={clsx('text-xs font-mono', idx.changePct >= 0 ? 'text-bull' : 'text-bear')}>
                 {idx.changePct >= 0 ? <TrendingUp size={10} className="inline mr-0.5" /> : <TrendingDown size={10} className="inline mr-0.5" />}
@@ -90,7 +91,7 @@ export default function Header() {
             isMarketOpen() ? 'bg-bull-dim text-bull-text' : 'bg-gray-800 text-gray-500'
           )}>
             <span className={clsx('w-1.5 h-1.5 rounded-full', isMarketOpen() ? 'bg-bull animate-pulse' : 'bg-gray-600')} />
-            {isMarketOpen() ? 'Markt offen' : 'Markt geschlossen'}
+            {isMarketOpen() ? 'XETRA offen' : 'XETRA geschlossen'}
           </div>
 
           {/* Time */}

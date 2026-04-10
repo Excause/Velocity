@@ -5,7 +5,7 @@ export function formatPrice(value, decimals = 2) {
   if (value == null) return '—'
   return new Intl.NumberFormat('de-DE', {
     style: 'currency',
-    currency: 'USD',
+    currency: 'EUR',
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(value)
@@ -13,7 +13,7 @@ export function formatPrice(value, decimals = 2) {
 
 export function formatPriceCompact(value) {
   if (value == null) return '—'
-  return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  return `${value.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`
 }
 
 export function formatChange(value, showSign = true) {
@@ -30,10 +30,10 @@ export function formatChangePct(value, showSign = true) {
 
 export function formatMarketCap(value) {
   if (!value) return '—'
-  if (value >= 1e12) return `$${(value / 1e12).toFixed(2)}T`
-  if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`
-  if (value >= 1e6) return `$${(value / 1e6).toFixed(2)}M`
-  return `$${value.toLocaleString()}`
+  if (value >= 1e12) return `${(value / 1e12).toFixed(2)} Bio. €`
+  if (value >= 1e9)  return `${(value / 1e9).toFixed(1)} Mrd. €`
+  if (value >= 1e6)  return `${(value / 1e6).toFixed(0)} Mio. €`
+  return `${value.toLocaleString('de-DE')} €`
 }
 
 export function formatVolume(value) {

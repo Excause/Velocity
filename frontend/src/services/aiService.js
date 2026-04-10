@@ -3,15 +3,13 @@ import { storageService } from './storageService.js'
 
 export const aiService = {
   async getRecommendations(riskProfile = 'moderate') {
-    // Filter by risk profile
     const riskMap = {
       conservative: ['low'],
-      moderate: ['low', 'medium'],
-      aggressive: ['low', 'medium', 'high'],
+      moderate:     ['low', 'medium'],
+      aggressive:   ['low', 'medium', 'high'],
     }
-    const allowedRisks = riskMap[riskProfile] || riskMap.moderate
-
-    return MOCK_RECOMMENDATIONS.filter(r => allowedRisks.includes(r.riskLevel))
+    const allowed = riskMap[riskProfile] || riskMap.moderate
+    return MOCK_RECOMMENDATIONS.filter(r => allowed.includes(r.riskLevel))
   },
 
   async analyzeStock(symbol, newsContext = []) {
@@ -23,24 +21,27 @@ export const aiService = {
     }
 
     try {
-      // Call Claude API via a simple fetch (note: in production, route through backend)
       const newsText = newsContext
         .slice(0, 5)
         .map(n => `- ${n.title}: ${n.summary}`)
         .join('\n')
 
-      const prompt = `Du bist ein erfahrener Finanzanalyst. Analysiere die Aktie ${symbol} basierend auf folgenden aktuellen Nachrichten:
+      const prompt = `Du bist ein erfahrener Börsenanalyst mit Schwerpunkt auf deutschen und europäischen Aktien (XETRA/Frankfurt). Analysiere die Aktie ${symbol} (XETRA) anhand folgender aktueller Nachrichten:
 
 ${newsText || 'Keine spezifischen Nachrichten verfügbar.'}
 
-Gib eine strukturierte Analyse mit:
-1. Handlungsempfehlung (Kaufen/Verkaufen/Beobachten)
-2. Kurzfristige Prognose (1-3 Monate)
-3. Hauptkatalysatoren
-4. Hauptrisiken
-5. Begründung (max. 3 Sätze)
+Erstelle eine strukturierte Analyse auf Deutsch mit:
+1. Handlungsempfehlung: "buy" | "sell" | "watch"
+2. Konfidenz: 0–100
+3. Kursziel in EUR (12 Monate)
+4. Zeithorizont: "1-3 Monate" | "3-6 Monate" | "6-12 Monate"
+5. Risiko: "low" | "medium" | "high"
+6. Begründung (3 Sätze, Deutsch)
+7. Katalysatoren: 3 Punkte
+8. Risiken: 3 Punkte
 
-Antworte auf Deutsch im JSON-Format.`
+Berücksichtige dabei: DAX-Umfeld, EZB-Zinspolitik, Konjunktur Deutschland/Europa, Branchentrends.
+Antworte NUR als gültiges JSON-Objekt.`
 
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -57,8 +58,7 @@ Antworte auf Deutsch im JSON-Format.`
         }),
       })
 
-      if (!response.ok) throw new Error(`API Error: ${response.status}`)
-
+      if (!response.ok) throw new Error(`API Error ${response.status}`)
       const data = await response.json()
       const text = data.content[0].text
 
@@ -66,10 +66,9 @@ Antworte auf Deutsch im JSON-Format.`
         const jsonMatch = text.match(/\{[\s\S]*\}/)
         if (jsonMatch) return JSON.parse(jsonMatch[0])
       } catch {}
-
       return { reasoning: text, action: 'watch', confidence: 60 }
     } catch (e) {
-      console.warn('Claude API failed:', e.message)
+      console.warn('Claude API Fehler:', e.message)
       return getMockAnalysis(symbol)
     }
   },
@@ -93,16 +92,22 @@ Antworte auf Deutsch im JSON-Format.`
         .map(n => `- ${n.title}`)
         .join('\n')
 
-      const prompt = `Erstelle einen prägnanten Börsenmorgen-Report auf Deutsch für Investoren.
+      const prompt = `Erstelle einen prägnanten Börsenmorgen-Report für DAX-Investoren.
 
-Heutige KI-Empfehlungen:
+Datum: ${new Date().toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+
+Heutige KI-Empfehlungen (XETRA):
 ${recoText}
 
 Wichtigste Nachrichten:
 ${newsText}
 
-Format: Kurzer Überblick (2-3 Sätze), Marktausblick, Top-Empfehlung mit Begründung.
-Stil: Professionell, direkt, auf den Punkt.`
+Format:
+1. Kurzer Marktausblick für den DAX (2 Sätze)
+2. Top-Empfehlung mit Begründung (2 Sätze)
+3. Wichtigstes Risiko heute (1 Satz)
+
+Stil: Professionell, präzise, auf den Punkt. Max. 150 Wörter.`
 
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -132,32 +137,36 @@ Stil: Professionell, direkt, auf den Punkt.`
   },
 }
 
+// ─── Mock-Analysen für Demo-Modus ─────────────────────────────────────────────
 function getMockAnalysis(symbol) {
   const analyses = {
-    NVDA: { action: 'buy', confidence: 91, reasoning: 'Starke KI-Chip-Nachfrage treibt Wachstum. Blackwell-Architektur setzt neuen Industriestandard.', catalysts: ['KI-Infrastruktur', 'Rechenzentrum-Ausbau'], risks: ['Exportbeschränkungen', 'Bewertung'] },
-    AAPL: { action: 'watch', confidence: 72, reasoning: 'Solides Geschäftsmodell aber Innovationsdynamik verlangsamt sich. iPhone-Supercycle aussteht.', catalysts: ['Apple Intelligence', 'Services-Wachstum'], risks: ['China-Markt', 'Regulierung'] },
-    TSLA: { action: 'watch', confidence: 58, reasoning: 'Hohes Risiko durch Margendruck und Rückrufe. FSD bleibt Hauptkatalysator.', catalysts: ['FSD', 'Robotaxi'], risks: ['Wettbewerb', 'Margen'] },
+    SAP:   { action: 'buy',   confidence: 88, reasoning: 'SAP transformiert sich erfolgreich in eine Cloud-Plattform. KI-Integration in S/4HANA bietet nachhaltiges Wachstumspotenzial. Bewertung trotz Anstieg noch attraktiv vs. globalen Software-Peers.', catalysts: ['Cloud-ARR Wachstum', 'Business AI', 'RISE with SAP'], risks: ['IT-Budgetkürzungen', 'Migrations-Verzögerungen'] },
+    IFX:   { action: 'buy',   confidence: 79, reasoning: 'Infineon positioniert sich ideal im Halbleiterzyklus-Aufschwung 2025. SiC-Technologie für E-Fahrzeuge und KI-Infrastruktur sind Wachstumstreiber. Bewertung nach Korrektur attraktiv.', catalysts: ['E-Mobilität Erholung', 'KI-Server', 'SiC-Kapazitäten'], risks: ['Zyklusrisiko', 'China-Exposure'] },
+    BAYN:  { action: 'sell',  confidence: 72, reasoning: 'Bayer bleibt durch Glyphosat-Verbindlichkeiten strukturell belastet. Pharmapipeline bietet keine kurzfristige Entlastung. Bewertungsrisiko überwiegt Katalysator-Potenzial.', catalysts: ['Glyphosat-Vergleich', 'Pharma-Pipeline'], risks: ['Rechtsverbindlichkeiten', 'Verschuldung', 'Pipeline-Rückschläge'] },
+    ALV:   { action: 'buy',   confidence: 82, reasoning: 'Allianz überzeugt mit Rekordgewinnen und attraktiver Dividendenrendite. Zinsnormalisierung verbessert Kapitalanlage-Ergebnisse strukturell. Defensiver DAX-Anker.', catalysts: ['Dividendenerhöhung', 'Aktienrückkauf', 'Zinsnormalisierung'], risks: ['Großkatastrophen', 'Regulierung'] },
+    VOW3:  { action: 'watch', confidence: 55, reasoning: 'VW handelt auf historisch günstiger Bewertung, aber strukturelle Herausforderungen in der E-Mobilität begrenzen kurzfristiges Aufwärtspotenzial. Restrukturierungserfolg entscheidend.', catalysts: ['Sparprogramm', 'China-Erholung', 'Software-Integration'], risks: ['BYD-Wettbewerb', 'Nachfrageschwäche E-Autos', 'Gewerkschaft'] },
   }
   return analyses[symbol] || {
     action: 'watch',
-    confidence: 65,
-    reasoning: 'Marktlage erfordert sorgfältige Beobachtung. Diversifikation empfohlen.',
-    catalysts: ['Branchentrends', 'Makroumfeld'],
-    risks: ['Marktvolatilität', 'Makrorisiken'],
+    confidence: 62,
+    reasoning: 'Marktlage erfordert sorgfältige Beobachtung. DAX-Umfeld bleibt von EZB-Politik und globaler Konjunktur abhängig. Diversifikation empfohlen.',
+    catalysts: ['EZB-Zinssenkungen', 'Konjunkturerholung', 'Sektor-Rotation'],
+    risks: ['Rezessionsrisiko Deutschland', 'Geopolitik', 'Energiepreise'],
   }
 }
 
-function getMockMorningReport(recommendations, topNews) {
-  const buyRecs = recommendations.filter(r => r.action === 'buy').slice(0, 2)
+function getMockMorningReport(recommendations, _topNews) {
+  const buyRecs = recommendations.filter(r => r.action === 'buy')
   const topRec = buyRecs[0]
+  const today = new Date().toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })
 
-  return `📊 **Velocity Morgen-Report** – ${new Date().toLocaleDateString('de-DE')}
+  return `📊 **Velocity DAX-Report** – ${today}
 
-Die asiatischen Märkte schlossen überwiegend positiv, die US-Futures deuten auf einen moderaten Aufwärtsstart hin. KI-Aktien bleiben der dominierende Sektor.
+**Marktausblick:** Der DAX dürfte moderat fester eröffnen. EZB-Zinssenkungserwartungen stützen das Sentiment, während schwache Industrie-PMI-Daten die Aufwärtsbewegung begrenzen.
 
-**Marktausblick:** Technologiewerte profitieren weiterhin von starker Quartalssaison. Fed-Signale für mögliche Zinssenkungen stützen das Sentiment. Energiesektor profitiert von OPEC+-Kürzungen.
+**Top-Empfehlung:** ${topRec ? `**${topRec.symbol}** (${topRec.action.toUpperCase()}) – ${topRec.reasoning.split('.')[0]}.` : 'Defensive Sektoren bevorzugen.'} Konfidenz: ${topRec?.confidence || 70}%.
 
-**Top-Empfehlung heute:** ${topRec ? `${topRec.symbol} (${topRec.action.toUpperCase()}) – ${topRec.reasoning.split('.')[0]}.` : 'Markt beobachten, Absicherung empfohlen.'}
+**Hauptrisiko heute:** Bundesbank-Kommentare zur Konjunkturlage und US-Handelsbilanzdaten (14:30 Uhr) könnten für Volatilität sorgen.
 
-*Diese Analyse basiert auf KI-generierten Signalen. Bitte eigene Due Diligence durchführen.*`
+*Diese Analyse basiert auf KI-generierten Signalen. Keine Anlageberatung – bitte eigene Due Diligence durchführen.*`
 }
