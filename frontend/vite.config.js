@@ -7,6 +7,15 @@ export default defineConfig({
   build: {
     outDir: '../dist',
     emptyOutDir: true,
+    rollupOptions: {
+      external: [],
+    },
+  },
+  optimizeDeps: {
+    exclude: ['@anthropic-ai/sdk'],
+  },
+  resolve: {
+    alias: {},
   },
   server: {
     port: 3000,
